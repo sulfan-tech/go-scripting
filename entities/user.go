@@ -76,6 +76,7 @@ type User struct {
 }
 
 type UserLogsMembership struct {
+	ExecutionId  string    `firestore:"executionId,omitempty" json:"executionId"`
 	DateTime     time.Time `firestore:"dateTime,omitempty" json:"dateTime"`
 	NewDate      time.Time `firestore:"newDate,omitempty" json:"newDate"`
 	PreviousDate time.Time `firestore:"previousDate,omitempty" json:"previousDate"`

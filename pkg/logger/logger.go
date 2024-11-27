@@ -33,37 +33,59 @@ func Init() {
 		}
 
 		writer = csv.NewWriter(logFile)
-		writeHeader() // Write header once when initialized
 	})
 }
 
-func writeHeader() {
-	headers := []string{"timestamp", "memberId", "daysToAdd", "isSuccessUpdateExpiredMembership", "isSuccessTypeChange"}
-	if err := writer.Write(headers); err != nil {
+func WriteHeader(header []string) error {
+	mutex.Lock()
+	defer mutex.Unlock()
+
+	Init() // logger is initialized before writing
+
+	// Write the header to the CSV file
+	if err := writer.Write(header); err != nil {
 		log.Println("Error writing header to CSV:", err)
+		return err
 	}
+
 	writer.Flush()
+	if err := writer.Error(); err != nil {
+		log.Println("Error flushing writer after writing header:", err)
+		return err
+	}
+
+	return nil
 }
 
-// LogInfo logs an informational message.
 func LogInfo(message string, details ...interface{}) {
 	writeCSV("INFO", message, details...)
 }
 
-func LogCustom(memberId, daysToAdd, isSuccessUpdatedExpired, isSuccessTypeChange string) {
-	writeCSV(memberId, daysToAdd, isSuccessUpdatedExpired, isSuccessTypeChange)
-}
-
-// LogError logs an error message.
 func LogError(message string, details ...interface{}) {
 	writeCSV("ERROR", message, details...)
+}
+
+func LogSalesBy(transactionId, salesBy, status, errorDetail string) {
+	writeCSV(transactionId, salesBy, status, errorDetail)
+}
+
+func LogCustom(memberId, daysToAdd, isSuccessUpdatedExpired, isSuccessTypeChange string, err error) {
+	writeCSV(memberId, daysToAdd, isSuccessUpdatedExpired, isSuccessTypeChange, err)
+}
+
+func LogGo(trxId, executionId, executionType, startDate, endDate, membershipLogs, isSuccessUpdateExpiredMembership, isSuccessTypeChange, isSuccessUpdateV1, isSuccessUpdateV6, errorStatus string) {
+	writeCSV(trxId, executionId, startDate, endDate, membershipLogs, isSuccessUpdateExpiredMembership, isSuccessTypeChange, isSuccessUpdateV1, isSuccessUpdateV6, errorStatus)
+}
+
+func LogCustomRefferal(memberId, freeDays, isSuccessUpdate, isSuccessTypeChangeStr string, err error, apiStatus string) {
+	writeCSV(memberId, freeDays, isSuccessUpdate, isSuccessTypeChangeStr, err, apiStatus)
 }
 
 func writeCSV(level, message string, details ...interface{}) {
 	mutex.Lock()
 	defer mutex.Unlock()
 
-	Init() // Ensure logger is initialized before writing
+	Init() // logger is initialized before writing
 
 	timestamp := time.Now().Format(time.RFC3339)
 	record := append([]string{timestamp, level, message}, toStringSlice(details)...)
@@ -78,9 +100,9 @@ func writeCSV(level, message string, details ...interface{}) {
 
 // toStringSlice converts a slice of interface{} to a slice of string
 func toStringSlice(details []interface{}) []string {
-	var result []string
-	for _, detail := range details {
-		result = append(result, fmt.Sprint(detail))
+	result := make([]string, len(details))
+	for i, detail := range details {
+		result[i] = fmt.Sprint(detail)
 	}
 	return result
 }
@@ -104,6 +126,5 @@ func CloseLogFile() {
 
 func generateFileNameWithTimestamp(basePath, prefix string) string {
 	currentTime := time.Now().Format("20060102_150405") // Format: YYYYMMDD_HHMMSS
-	fileName := fmt.Sprintf("%s_%s.csv", prefix, currentTime)
-	return filepath.Join(basePath, fileName)
+	return filepath.Join(basePath, fmt.Sprintf("%s_%s.csv", prefix, currentTime))
 }

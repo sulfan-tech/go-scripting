@@ -3,29 +3,30 @@ package main
 import (
 	"context"
 	"fmt"
-	"go-scripting/entities"
 	csvprocessor "go-scripting/pkg/csv_processor"
 	"go-scripting/pkg/logger"
-	"go-scripting/scripts/early_book_access/service"
-
+	"go-scripting/scripts/adjust_expired_membership/service"
 	"log"
 	"sync"
-	"time"
 
 	"github.com/joho/godotenv"
 )
 
 const (
-	filePath   = "input.csv"
-	numWorkers = 100 // Number of concurrent workers
+	filePath              = "input.csv"
+	missingAttributeError = "error: %s is empty in CSV row %d"
+	unsupportedTypeError  = "error: Unsupported Type '%s' in CSV row %d"
+	operationFailedError  = "operation failed on Row %d: %v"
+	numWorkers            = 50 // Number of workers
 )
 
 type CSVRow struct {
-	MemberID string
-	Uid      string
+	MemberId  string
+	DaysToAdd string
+	Logs      string
 }
 
-var ebaService service.EBAInterface
+var adjustExpiredMembershipService service.AdjustmentExpiredMembershipImpl
 
 func init() {
 	env := "../../.env"
@@ -34,10 +35,13 @@ func init() {
 		log.Fatal("Error loading .env file:", err.Error())
 	}
 
-	ebaService = service.NewUserEBAService()
+	adjustExpiredMembershipService = service.NewInstanceAdjustmentExpiredMembership()
+	logger.Init()
 }
 
 func main() {
+	defer logger.CloseLogFile()
+
 	csvReader := csvprocessor.NewCSVReader()
 
 	data, err := csvReader.ReadCSV(context.Background(), filePath)
@@ -45,21 +49,17 @@ func main() {
 		log.Fatal("Error reading CSV:", err)
 		return
 	}
-
 	mappedData := mapToCSVRow(data)
 
-	// Channel for CSV rows and for results
 	rowChan := make(chan CSVRow, len(mappedData))
 	resultChan := make(chan error, len(mappedData))
 	var wg sync.WaitGroup
 
-	// Launch worker goroutines
 	for i := 0; i < numWorkers; i++ {
 		wg.Add(1)
 		go worker(rowChan, resultChan, &wg)
 	}
 
-	// Send rows to rowChan
 	go func() {
 		for _, row := range mappedData {
 			rowChan <- row
@@ -67,24 +67,21 @@ func main() {
 		close(rowChan)
 	}()
 
-	// Close resultChan after all workers are done
 	go func() {
 		wg.Wait()
 		close(resultChan)
 	}()
 
-	// Process results
 	rowNumber := 1
 	for err := range resultChan {
 		if err != nil {
 			log.Printf("Error processing row %d: %v", rowNumber, err)
-		} else {
-			log.Printf("Successfully processed row %d", rowNumber)
 		}
 		rowNumber++
 	}
 
 	log.Println("Processing completed.")
+
 }
 
 func worker(rowChan <-chan CSVRow, resultChan chan<- error, wg *sync.WaitGroup) {
@@ -96,34 +93,16 @@ func worker(rowChan <-chan CSVRow, resultChan chan<- error, wg *sync.WaitGroup) 
 }
 
 func processRow(row CSVRow) error {
-	ctx := context.Background()
+	log.Printf("Processing - MemberId: %s, Days: %s\n", row.MemberId, row.DaysToAdd)
 
-	eba := entities.EBA{
-		UserID:        row.Uid,
-		Slot:          1,
-		ExpiredDate:   time.Now().AddDate(0, 0, 14),
-		AvailableFrom: time.Now().AddDate(0, 0, -1),
-	}
-	bypass := entities.BYPASS{
-		Uid:    row.Uid,
-		Bypass: true,
-	}
-
-	req := service.RequestUserEBA{
-		InsertEBA: eba,
-		BypassEBA: bypass,
-	}
-
-	log.Printf("Processing row - MemberID: %s\n", row.MemberID)
-
-	err := ebaService.InsertUserEBA(ctx, req)
+	err := adjustExpiredMembershipService.AdjustExpiredMembership(context.Background(), row.MemberId)
 	if err != nil {
-		log.Printf("Error processing row - MemberID: %s: %s", row.MemberID, err.Error())
+		log.Println("Error", err)
+		logger.LogError(fmt.Sprintf("Member: (%s) failed", row.MemberId))
 		return err
 	}
 
-	logger.LogInfo(fmt.Sprintf("MemberID (%v) successfully Add to EBA", row.MemberID))
-
+	logger.LogInfo(fmt.Sprintf("Add (%v) Day on Member: (%s) updated successfully", row.DaysToAdd, row.MemberId))
 	return nil
 }
 
@@ -132,8 +111,9 @@ func mapToCSVRow(data [][]string) []CSVRow {
 
 	for _, row := range data {
 		csvRow := CSVRow{
-			MemberID: row[0],
-			Uid:      row[1],
+			MemberId:  row[0],
+			DaysToAdd: row[1],
+			Logs:      row[2],
 		}
 
 		result = append(result, csvRow)

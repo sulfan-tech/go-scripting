@@ -3,16 +3,15 @@ package main
 import (
 	"context"
 	csvprocessor "go-scripting/pkg/csv_processor"
-	"go-scripting/script/extend_expired_pt_package/service"
+	"go-scripting/scripts/extend_expired_pt_package/service"
+
 	"log"
-	"sync"
 
 	"github.com/joho/godotenv"
 )
 
 const (
-	filePath   = "input.csv"
-	numWorkers = 100 // Number of concurrent workers
+	filePath = "pt-stack - Sheet1.csv"
 )
 
 type CSVRow struct {
@@ -46,54 +45,20 @@ func main() {
 
 	mappedData := mapToCSVRow(data)
 
-	// Channel for CSV rows and for results
-	rowChan := make(chan CSVRow, len(mappedData))
-	resultChan := make(chan error, len(mappedData))
-	var wg sync.WaitGroup
-
-	// Launch worker goroutines
-	for i := 0; i < numWorkers; i++ {
-		wg.Add(1)
-		go worker(rowChan, resultChan, &wg)
-	}
-
-	// Send rows to rowChan
-	go func() {
-		for _, row := range mappedData {
-			if row.Type != "Extend" {
-				log.Println("SKIP Unsupported Type")
-				continue
-			}
-			row.MemberPhoneNumber = sanitizePhoneNumber(row.MemberPhoneNumber)
-			rowChan <- row
+	for i, row := range mappedData {
+		if row.Type != "Extend" {
+			log.Println("SKIP Unsupported Type")
+			continue
 		}
-		close(rowChan)
-	}()
+		row.MemberPhoneNumber = sanitizePhoneNumber(row.MemberPhoneNumber)
 
-	// Close resultChan after all workers are done
-	go func() {
-		wg.Wait()
-		close(resultChan)
-	}()
-
-	// Process results
-	rowNumber := 1
-	for err := range resultChan {
+		err := processRow(row)
 		if err != nil {
-			log.Printf("Error processing row %d: %v", rowNumber, err)
+			log.Printf("Error processing row %d: %v", i+1, err)
 		}
-		rowNumber++
 	}
 
 	log.Println("Processing completed.")
-}
-
-func worker(rowChan <-chan CSVRow, resultChan chan<- error, wg *sync.WaitGroup) {
-	defer wg.Done()
-	for row := range rowChan {
-		err := processRow(row)
-		resultChan <- err
-	}
 }
 
 func processRow(row CSVRow) error {
@@ -135,7 +100,9 @@ func mapToCSVRow(data [][]string) []CSVRow {
 }
 
 func sanitizePhoneNumber(phoneNumber string) string {
-	// Assuming that phoneNumber is always in the format "6281213390614"
-	// You can modify this function based on the actual structure of your phone numbers
-	return "+6" + phoneNumber[1:]
+	// Format phone numbers starting with "0" to start with "+62"
+	if len(phoneNumber) > 0 && phoneNumber[0] == '0' {
+		return "+62" + phoneNumber[1:]
+	}
+	return phoneNumber
 }

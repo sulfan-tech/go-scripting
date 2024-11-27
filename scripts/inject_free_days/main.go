@@ -3,11 +3,12 @@ package main
 import (
 	"context"
 	"fmt"
-	csvprocessor "go-scripting/pkg/csv_processor"
-	"go-scripting/pkg/logger"
-	"go-scripting/script/inject_free_days/service"
 	"log"
 	"sync"
+
+	csvprocessor "go-scripting/pkg/csv_processor"
+	"go-scripting/pkg/logger"
+	"go-scripting/scripts/inject_free_days/service"
 
 	"github.com/joho/godotenv"
 )
@@ -21,9 +22,10 @@ const (
 )
 
 type CSVRow struct {
-	MemberId  string
-	DaysToAdd string
-	Logs      string
+	ExecutionID string
+	MemberId    string
+	DaysToAdd   string
+	Logs        string
 }
 
 var freeDaysService service.FreeDaysInterface
@@ -36,15 +38,17 @@ func init() {
 	}
 
 	freeDaysService = service.NewFreeDaysService()
+	logger.Init()
 }
 
 func main() {
+	defer logger.CloseLogFile()
+
 	csvReader := csvprocessor.NewCSVReader()
 
 	data, err := csvReader.ReadCSV(context.Background(), filePath)
 	if err != nil {
 		log.Fatal("Error reading CSV:", err)
-		return
 	}
 
 	mappedData := mapToCSVRow(data)
@@ -90,16 +94,19 @@ func worker(rowChan <-chan CSVRow, resultChan chan<- error, wg *sync.WaitGroup) 
 }
 
 func processRow(row CSVRow) error {
-	log.Printf("Processing - MemberId: %s, Days: %s\n", row.MemberId, row.DaysToAdd)
+	log.Printf("Processing --++--> MemberId : %s, Days T0 Add : %s\n", row.MemberId, row.DaysToAdd)
 
-	err := freeDaysService.AddFreeDays(context.Background(), row.MemberId, row.DaysToAdd, row.Logs)
+	isSuccessExpiredDate, isSuccessTypeChange, err := freeDaysService.AddFreeDays(context.Background(), row.ExecutionID, row.MemberId, row.DaysToAdd, row.Logs)
 	if err != nil {
-		log.Println("Error", err)
-		logger.LogInfo(fmt.Sprintf("Member: (%s) failed", row.MemberId))
+		log.Println("Error:", err)
+		logger.LogError(fmt.Sprintf("Member: (%s) failed", row.MemberId))
 		return err
 	}
 
-	logger.LogInfo(fmt.Sprintf("Add (%v) Day on Member: (%s) updated successfully", row.DaysToAdd, row.MemberId))
+	isSuccessUpdate := fmt.Sprintf("%v", isSuccessExpiredDate)
+	isSuccessTypeChangeStr := fmt.Sprintf("%v", isSuccessTypeChange)
+
+	logger.LogCustom(row.MemberId, row.DaysToAdd, isSuccessUpdate, isSuccessTypeChangeStr, err)
 	return nil
 }
 
@@ -108,9 +115,10 @@ func mapToCSVRow(data [][]string) []CSVRow {
 
 	for _, row := range data {
 		csvRow := CSVRow{
-			MemberId:  row[0],
-			DaysToAdd: row[1],
-			Logs:      row[2],
+			ExecutionID: row[0],
+			MemberId:    row[1],
+			DaysToAdd:   row[2],
+			Logs:        row[3],
 		}
 
 		result = append(result, csvRow)

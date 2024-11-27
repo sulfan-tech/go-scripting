@@ -11,7 +11,7 @@ import (
 )
 
 func Setup() *firestore.Client {
-	env := os.Getenv("env")
+	env := os.Getenv("ENV")
 	ctx := context.Background()
 	var sa option.ClientOption
 	if env == "PRODUCTION" {

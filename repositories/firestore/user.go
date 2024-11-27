@@ -11,14 +11,19 @@ import (
 
 	"cloud.google.com/go/firestore"
 	"google.golang.org/api/iterator"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 type UsersRepo interface {
+	CreateUser(ctx context.Context, user *entities.User) error
+	CreateLogMembership(ctx context.Context, uid string, logMembership entities.UserLogsMembership) error
 	QueryUserByPhone(phone string) (*entities.User, error)
 	QueryUserByUserAppId(userAppId string) (*entities.User, error)
 	GetLatestLogMembership(ctx context.Context, uid string) ([]entities.UserLogsMembership, error)
 	GetUserPTPackagesByUID(ctx context.Context, uid string) ([]entities.UserPTPackage, error)
 	GetPTPackagesByUID(ctx context.Context, uidMember, uidPackage string) (*entities.UserPTPackage, error)
+	GetLogMembershipByExecutionId(ctx context.Context, uid, executionId string) (*entities.UserLogsMembership, error)
 	UpdateExpiredMembership(ctx context.Context, uid string, newExpirationDate time.Time) error
 	UpdateFieldMembership(ctx context.Context, uid string, updateFields map[string]interface{}) error
 	UpdateUserPTPackageFields(ctx context.Context, uid string, packageID string, updateFields map[string]interface{}) error
@@ -52,6 +57,37 @@ func (r *FSUser) GetPTPackagesByUID(ctx context.Context, uidMember, uidPackage s
 	}
 
 	return &userPTPackages, nil
+}
+
+// GetLogMembershipByExecutionId retrieves log membership by ExecutionId for a specific user
+func (r *FSUser) GetLogMembershipByExecutionId(ctx context.Context, uid, executionId string) (*entities.UserLogsMembership, error) {
+	docRef := r.client.Collection("users").Doc(uid).Collection("logsMembership").Doc(executionId)
+
+	snapshot, err := docRef.Get(ctx)
+	if err != nil {
+		if status.Code(err) == codes.NotFound {
+			return nil, nil // Document not found, continue
+		}
+		return nil, err
+	}
+
+	var logMembership entities.UserLogsMembership
+	if err := snapshot.DataTo(&logMembership); err != nil {
+		return nil, err
+	}
+
+	return &logMembership, nil
+}
+
+func (r *FSUser) CreateLogMembership(ctx context.Context, uid string, logMembership entities.UserLogsMembership) error {
+	docRef := r.client.Collection("users").Doc(uid).Collection("logsMembership").Doc(logMembership.ExecutionId)
+
+	_, err := docRef.Set(ctx, logMembership)
+	if err != nil {
+		return err
+	}
+
+	return nil
 }
 
 func (r *FSUser) QueryUserByUserAppId(userAppId string) (*entities.User, error) {
@@ -129,18 +165,14 @@ func (r *FSUser) QueryUserByPhone(phone string) (*entities.User, error) {
 }
 
 func (r *FSUser) UpdateExpiredMembership(ctx context.Context, uid string, newExpirationDate time.Time) error {
-	// Get a reference to the Firestore user document by UID
 	userRef := r.client.Collection("users").Doc(uid)
 
-	// Create a map with the updated data
 	updateData := map[string]interface{}{
 		"expiredMembership": newExpirationDate,
 	}
 
-	// Update the user document with the new expiration date
 	_, err := userRef.Set(ctx, updateData, firestore.MergeAll)
 	if err != nil {
-		// Handle the error if the update fails
 		return fmt.Errorf("error updating expiredMembership: %v", err)
 	}
 
@@ -236,6 +268,19 @@ func (r *FSUser) GetUserPTPackagesByUID(ctx context.Context, uid string) ([]enti
 
 // 	return err
 // }
+
+func (r *FSUser) CreateUser(ctx context.Context, user *entities.User) error {
+	// Construct the reference to the Firestore document
+	docRef := r.client.Collection("users").Doc(user.Uid)
+
+	// Set the user data
+	_, err := docRef.Set(ctx, user)
+	if err != nil {
+		return fmt.Errorf("error creating user: %v", err)
+	}
+
+	return nil
+}
 
 // UpdateUserPTPackageFields updates specific fields of the UserPTPackage document in Firestore.
 func (r *FSUser) UpdateUserPTPackageFields(ctx context.Context, uid string, packageID string, updateFields map[string]interface{}) error {
