@@ -13,7 +13,7 @@ type ChangeHomeClub struct {
 }
 
 type ChangeHomeClubInterface interface {
-	BulkChangeHomeClub(ctx context.Context, phone, newHomeClub string) error
+	BulkChangeHomeClub(ctx context.Context, memberId, newHomeClub string) error
 }
 
 func NewChangeHomeClubService() ChangeHomeClubInterface {
@@ -24,16 +24,16 @@ func NewChangeHomeClubService() ChangeHomeClubInterface {
 	}
 }
 
-func (c *ChangeHomeClub) BulkChangeHomeClub(ctx context.Context, phone, newHomeClub string) error {
-	member, err := c.usersRepository.QueryUserByPhone(phone)
+func (c *ChangeHomeClub) BulkChangeHomeClub(ctx context.Context, memberId, newHomeClub string) error {
+	member, err := c.usersRepository.QueryUserByUserAppId(memberId)
 	if err != nil {
-		logger.LogError(fmt.Sprintf("Error querying member by phone (%s): %v", phone, err))
-		return fmt.Errorf("error querying member by phone (%s): %v", phone, err)
+		logger.LogError(fmt.Sprintf("Error querying member by memberId (%s): %v", memberId, err))
+		return fmt.Errorf("error querying member by memberId (%s): %v", memberId, err)
 	}
 
 	if member == nil {
-		logger.LogInfo(fmt.Sprintf("Member with phone (%s) not found", phone))
-		return fmt.Errorf("member with phone (%s) not found", phone)
+		logger.LogInfo(fmt.Sprintf("Member with memberId (%s) not found", memberId))
+		return fmt.Errorf("member with memberId (%s) not found", memberId)
 	}
 
 	updateData := map[string]interface{}{
@@ -43,8 +43,8 @@ func (c *ChangeHomeClub) BulkChangeHomeClub(ctx context.Context, phone, newHomeC
 
 	err = c.usersRepository.UpdateFieldMembership(ctx, member.Uid, updateData)
 	if err != nil {
-		logger.LogError(fmt.Sprintf("Error updating homeclub for member with phone (%s): %v", phone, err))
-		return fmt.Errorf("error updating homeclub for member with phone (%s): %v", phone, err)
+		logger.LogError(fmt.Sprintf("Error updating homeclub for member with memberId (%s): %v", memberId, err))
+		return fmt.Errorf("error updating homeclub for member with memberId (%s): %v", memberId, err)
 	}
 
 	return nil

@@ -5,6 +5,7 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/service/cognitoidentityprovider"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 )
 
@@ -25,4 +26,8 @@ func NewAWS() *AwsConfig {
 
 func (ac *AwsConfig) DynamoDB() *dynamodb.Client {
 	return dynamodb.NewFromConfig(ac.cfg)
+}
+
+func (ac *AwsConfig) Cognito() *cognitoidentityprovider.Client {
+	return cognitoidentityprovider.NewFromConfig(ac.cfg)
 }

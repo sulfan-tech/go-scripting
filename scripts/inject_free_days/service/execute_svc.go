@@ -15,7 +15,7 @@ type FreeDaysService struct {
 }
 
 type FreeDaysInterface interface {
-	AddFreeDays(ctx context.Context, memberId, daysToAdd, logs string) error
+	AddFreeDays(ctx context.Context, ExecutionId, memberId, daysToAdd, logs string) (bool, bool, error)
 }
 
 type ErrorCode struct {
@@ -33,70 +33,62 @@ func NewFreeDaysService() FreeDaysInterface {
 }
 
 // AddFreeDays adds free days to a user's membership and updates logs accordingly
-func (f *FreeDaysService) AddFreeDays(ctx context.Context, memberId, daysToAdd, logs string) error {
+func (f *FreeDaysService) AddFreeDays(ctx context.Context, executionId, memberId, daysToAdd, logs string) (bool, bool, error) {
+	isSuccessUpdateExpiredMembership, isSuccessTypeChange := false, false
 
+	// Query user by memberId
 	user, err := f.usersRepository.QueryUserByUserAppId(memberId)
 	if err != nil {
-		logger.LogError(fmt.Sprintf("Error querying user by memberId (%s): %v", memberId, err))
-		return fmt.Errorf("error querying user by memberId (%s): %w", memberId, err)
+		return false, false, fmt.Errorf("error querying memberId (%s): %w", memberId, err)
 	}
-
 	if user == nil {
-		logger.LogInfo(fmt.Sprintf("User with memberId (%s) not found", memberId))
-		return fmt.Errorf("user with memberId (%s) not found", memberId)
+		return false, false, fmt.Errorf("memberId (%s) not found", memberId)
 	}
 
 	days, err := strconv.Atoi(daysToAdd)
 	if err != nil {
-		return fmt.Errorf("failed to parse daysToAdd: %w", err)
+		return false, false, fmt.Errorf("failed to parse daysToAdd: %w", err)
 	}
 
+	// the current date at the beginning of the day in UTC+7 timezone
+	currentDate := time.Now().UTC().Add(-24 * time.Hour).Add(7 * time.Hour)
+
+	if user.MembershipStatus == 1 && user.ExpiredUpdate.After(currentDate) {
+		return false, false, fmt.Errorf("memberId (%s) has a transfer provider status", memberId)
+	}
+
+	// Check if executionId already exists in the database
+	existingLog, errExistingLog := f.usersRepository.GetLogMembershipByExecutionId(ctx, user.Uid, executionId)
+	if errExistingLog != nil {
+		return false, false, fmt.Errorf("error checking existing log membership: %w", errExistingLog)
+	}
+	if existingLog != nil && existingLog.ExecutionId == executionId {
+		return false, false, fmt.Errorf("user already updated with execution id: %s", executionId)
+	}
+
+	// Update expiredMembership with skip trigger function
 	newExpiredMembership := user.ExpiredMembership.AddDate(0, 0, days)
 	if err := f.usersRepository.UpdateExpiredMembership(ctx, user.Uid, newExpiredMembership); err != nil {
 		logger.LogError(fmt.Sprintf("Error updating expired membership for user with memberId (%s): %v", memberId, err))
-		return fmt.Errorf("error updating expired membership for user with memberId (%s): %w", memberId, err)
+		return false, false, fmt.Errorf("error updating expired membership for user with memberId (%s): %w", memberId, err)
 	}
+	isSuccessUpdateExpiredMembership = true
 
-	time.Sleep(7 * time.Second)
-
-	var logMemberships []entities.UserLogsMembership
-	const maxRetries = 3
-
-	for i := 0; i < maxRetries; i++ {
-		logMemberships, err = f.usersRepository.GetLatestLogMembership(ctx, user.Uid)
-		if err != nil {
-			logger.LogError(fmt.Sprintf("Error getting latest log membership for user with memberId (%s): %v", memberId, err))
-			return fmt.Errorf("error getting latest log membership for user with memberId (%s): %w", memberId, err)
-		}
-
-		if len(logMemberships) > 0 {
-			break
-		}
-
-		if i < maxRetries-1 {
-			time.Sleep(5 * time.Second)
-		}
+	// Create logs membership
+	logMembership := entities.UserLogsMembership{
+		ExecutionId:  executionId,
+		DateTime:     time.Now(),
+		NewDate:      newExpiredMembership,
+		PreviousDate: user.ExpiredMembership,
+		TypeChange:   logs,
 	}
-
-	if len(logMemberships) == 0 {
-		logger.LogError(fmt.Sprintf("No logsMembership found in the latest log after multiple attempts for user with memberId (%s)", memberId))
-		return fmt.Errorf("no logsMembership found in the latest log after multiple attempts for user with memberId (%s)", memberId)
+	err = f.usersRepository.CreateLogMembership(ctx, user.Uid, logMembership)
+	if err != nil {
+		logger.LogError(fmt.Sprintf("Error creating logs membership for user with memberId (%s): %v", memberId, err))
+		isSuccessTypeChange = false
+		return false, false, fmt.Errorf("error creating logs membership for user with memberId (%s): %w", memberId, err)
 	}
+	isSuccessTypeChange = true
 
-	logsMembership := logs
-	if logsMembership == "" {
-		logsMembership = "Adjustment ExpiredDate (Ticketing)"
-	}
-
-	for _, log := range logMemberships {
-		if log.NewDate.Equal(newExpiredMembership) {
-			if err := f.usersRepository.UpdateLogMembershipAndTypeChange(ctx, user.Uid, logsMembership); err != nil {
-				logger.LogError(fmt.Sprintf("Error updating log membership for user with memberId (%s): %v", memberId, err))
-				return fmt.Errorf("error updating log membership for user with memberId (%s): %w", memberId, err)
-			}
-			break
-		}
-	}
-
-	return nil
+	return isSuccessUpdateExpiredMembership, isSuccessTypeChange, nil
 }

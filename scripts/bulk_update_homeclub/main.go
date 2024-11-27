@@ -18,7 +18,7 @@ const (
 )
 
 type CSVRow struct {
-	Phone       string
+	MemberId    string
 	NewHomeClub string
 }
 
@@ -61,16 +61,16 @@ func processCSVData(data [][]string) {
 }
 
 func processRow(row CSVRow, rowCount int) error {
-	log.Printf("Processing row %d - Phone: %s, NewHomeClub: %s", rowCount, row.Phone, row.NewHomeClub)
+	log.Printf("Processing row %d - MemberId: %s, NewHomeClub: %s", rowCount, row.MemberId, row.NewHomeClub)
 
-	err := changeHomeClubService.BulkChangeHomeClub(context.Background(), row.Phone, row.NewHomeClub)
+	err := changeHomeClubService.BulkChangeHomeClub(context.Background(), row.MemberId, row.NewHomeClub)
 	if err != nil {
-		errorMsg := fmt.Sprintf("Member (%s) failed on Row (%d): %v", row.Phone, rowCount, err)
+		errorMsg := fmt.Sprintf("Member (%s) failed on Row (%d): %v", row.MemberId, rowCount, err)
 		logger.LogError(errorMsg)
 		return fmt.Errorf("operation failed on Row %d: %v", rowCount, err)
 	}
 
-	successMsg := fmt.Sprintf("ChangeHomeClub (%v) on Member (%s) updated successfully on Row (%v)", row.NewHomeClub, row.Phone, rowCount)
+	successMsg := fmt.Sprintf("ChangeHomeClub (%v) on Member (%s) updated successfully on Row (%v)", row.NewHomeClub, row.MemberId, rowCount)
 	logger.LogInfo(successMsg)
 	return nil
 }
@@ -79,7 +79,7 @@ func mapToCSVRows(data [][]string) []CSVRow {
 	var result []CSVRow
 	for _, row := range data {
 		result = append(result, CSVRow{
-			Phone:       row[0],
+			MemberId:    row[0],
 			NewHomeClub: row[1],
 		})
 	}
