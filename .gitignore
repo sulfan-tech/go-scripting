@@ -1,0 +1,7 @@
+../../scripts/backdate_transaction
+../../scripts/delete_transaction
+../../scripts/change_package
+
+.env
+staging-firebase-service-account.json
+prod-firebase-service-account.json
